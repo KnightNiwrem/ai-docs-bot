@@ -106,7 +106,7 @@ If you change `DOCS_BOT_WEBHOOK_SECRET`, call `setWebhook` again with the new va
 
 ## Usage
 
-- In any chat, type `@your_bot` followed by a search query, such as `@your_bot session storage`, then pick a result to send a link to that page.
+- In any chat, type `@your_bot` followed by a search query, such as `@your_bot session storage`, then pick a result to send a link to that page. The message shows the page title in bold, then the URL, and opens as an [Instant View](https://instantview.telegram.org/) page using the same IV template as [@grammYdocsbot](https://github.com/grammyjs/docs-bot).
 - `/start` or `/help` in a private chat explains this and offers a button that starts an inline search.
 
 ## Search configuration

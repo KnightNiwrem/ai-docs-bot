@@ -4,7 +4,7 @@ import {
   InlineQueryResultBuilder,
   webhookCallback,
 } from "grammy";
-import type { InlineQueryResultArticle } from "grammy/types";
+import type { InlineQueryResultArticle, MessageEntity } from "grammy/types";
 
 export interface Env {
   DOCS_BOT_TOKEN: string;
@@ -22,6 +22,10 @@ const KEENABLE_URL = "https://api.keenable.ai/v1/search";
 // Anything up to 50 fits in one answerInlineQuery call, so there is no paging.
 const MAX_RESULTS = 25;
 const KEENABLE_TIMEOUT_MS = 5000;
+// Instant View template for grammy.dev, the same one @grammYdocsbot uses:
+// https://github.com/grammyjs/docs-bot/blob/main/iv-rules.txt
+const IV_RHASH = "d32ab671cec0eb";
+const ZWSP = "\u200b";
 
 interface KeenableResult {
   title: string;
@@ -63,6 +67,24 @@ async function searchDocs(
   return results;
 }
 
+// Like @grammYdocsbot, send the title in bold, followed by an invisible
+// zero-width space that links to the Instant View page, so that Telegram shows
+// the IV preview, and then the plain URL on its own line.
+function toMessage(title: string, url: string) {
+  return {
+    text: `${title}${ZWSP}\n\n${url}`,
+    entities: [
+      { type: "bold", offset: 0, length: title.length },
+      {
+        type: "text_link",
+        offset: title.length,
+        length: ZWSP.length,
+        url: `https://t.me/iv?rhash=${IV_RHASH}&url=${encodeURIComponent(url)}`,
+      },
+    ] satisfies MessageEntity[],
+  };
+}
+
 // grammy.dev serves every page both with and without `.html`, and Keenable
 // indexes both, so normalize URLs and keep the first (highest-ranked) match.
 function toArticles(results: KeenableResult[]): InlineQueryResultArticle[] {
@@ -80,11 +102,12 @@ function toArticles(results: KeenableResult[]): InlineQueryResultArticle[] {
       .replace(/​/g, "")
       .replace(/\s+/g, " ")
       .trim();
+    const { text, entities } = toMessage(title, url.href);
     articles.push(
       InlineQueryResultBuilder.article(String(articles.length), title, {
         url: url.href,
         description,
-      }).text(`${title}\n${url.href}`),
+      }).text(text, { entities }),
     );
   }
   return articles;
