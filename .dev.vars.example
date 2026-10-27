@@ -1,2 +1,7 @@
-# Copy this file to .dev.vars and add your actual bot token
-BOT_TOKEN=your_telegram_bot_token_here
+# Copy this file to .dev.vars and add your actual credentials
+DOCS_BOT_TOKEN=your_telegram_bot_token_here
+# Optional: without a key, the bot uses Keenable's rate-limited public endpoint
+KEENABLE_API_KEY=keen_your_keenable_api_key_here
+# Optional: Telegram sends this in the X-Telegram-Bot-Api-Secret-Token header
+# (pass it as secret_token to setWebhook); requests without it get a 401
+DOCS_BOT_WEBHOOK_SECRET=random_string_of_letters_digits_underscores_hyphens

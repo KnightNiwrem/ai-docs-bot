@@ -1,29 +1,29 @@
-# cfw-grammY
+# grammY Docs Bot
 
-A Telegram bot running on Cloudflare Workers using the grammY library.
+A Telegram inline bot that searches the [grammY documentation](https://grammy.dev/). Type `@your_bot <question>` in any chat, and the bot lists the most relevant grammy.dev pages, ranked by relevance, as articles you can send.
 
 ## Features
 
+- 🔎 Web search scoped to grammy.dev, powered by the [Keenable search API](https://docs.keenable.ai/api-reference/search)
 - ✨ Built with [grammY](https://grammy.dev/) - The Telegram Bot Framework
-- 🚀 Deployed on [Cloudflare Workers](https://workers.cloudflare.com/) for edge computing
+- 🚀 Deployed on [Cloudflare Workers](https://workers.cloudflare.com/), with no storage bindings required
 - 📦 TypeScript support with proper type definitions
-- 🔧 Easy configuration with Wrangler
-- 💾 Typed per-chat sessions backed by Cloudflare KV using [grammY's storage adapter](https://github.com/grammyjs/storages)
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js 24.22.1+ within 24.x, or Node.js 26.12.1 or newer. Node.js 24.22.1 is pinned in `.nvmrc`; run `nvm install` then `nvm use` if you use nvm.
-- A Telegram Bot Token (get one from [@BotFather](https://t.me/BotFather))
+- A Telegram Bot Token (get one from [@BotFather](https://t.me/BotFather)) with inline mode enabled (`/setinline` in @BotFather)
+- A [Keenable API key](https://app.keenable.ai/console) (recommended; see [Search configuration](#search-configuration))
 - A Cloudflare account
 
 ### Installation
 
 1. Clone this repository:
 ```bash
-git clone https://github.com/KnightNiwrem/cfw-grammY.git
-cd cfw-grammY
+git clone <your-repository-url>
+cd ai-docs-bot
 ```
 
 2. Install dependencies:
@@ -31,19 +31,19 @@ cd cfw-grammY
 npm ci
 ```
 
-3. Configure your local bot token:
+3. Configure your local credentials:
 ```bash
 cp .dev.vars.example .dev.vars
 ```
 
-Edit `.dev.vars` and replace the placeholder with your Telegram bot token. This file is ignored by Git. Use a separate bot for development to avoid interfering with your production webhook.
+Edit `.dev.vars` and set `DOCS_BOT_TOKEN` to your Telegram bot token and `KEENABLE_API_KEY` to your Keenable API key. This file is ignored by Git. Use a separate bot for development to avoid interfering with your production webhook.
 
 4. Generate Worker types for your editor:
 ```bash
 npm run cf-typegen
 ```
 
-Types are generated from your Wrangler configuration and compatibility date. Regenerate them after changing bindings or compatibility settings. The generated file is ignored by Git; `typecheck` also regenerates it automatically.
+Types are generated from your Wrangler configuration and compatibility date. Regenerate them after changing compatibility settings. The generated file is ignored by Git; `typecheck` also regenerates it automatically.
 
 ### Development
 
@@ -64,61 +64,58 @@ npm run build
 npm test
 ```
 
-`build` checks types and writes the bundle to `dist/`. The tests exercise the bundled Worker with mocked Telegram API responses and do not require real credentials.
+`build` checks types and writes the bundle to `dist/`. The tests exercise the bundled Worker with mocked Telegram and Keenable API responses and do not require real credentials.
 
 Run `npm run fmt` to apply formatting. GitHub Actions runs formatting, lint, type checks, and tests on pull requests and pushes to `main` or `master`, using the Node.js version in `.nvmrc`.
 
-`wrangler dev` uses local KV storage for the `BOT_DATA` binding, so you can develop before creating a remote namespace. Local data is kept under `.wrangler/` and is separate from production data. The tests use an in-memory KV mock to check session persistence and isolation between chats.
-
 ### Deployment
 
-Choose your Worker name in `wrangler.toml`, sign in to Cloudflare, and create a KV namespace for your bot's sessions:
+Choose your Worker name in `wrangler.toml` and sign in to Cloudflare:
 
 ```bash
 npx wrangler login
-npx wrangler kv namespace create BOT_DATA
 ```
 
-Replace `REPLACE_WITH_YOUR_KV_NAMESPACE_ID` in `wrangler.toml` with the namespace ID returned by that command. If you already have a namespace, use its ID instead. Keep the binding name `BOT_DATA` so it matches `env.BOT_DATA` in the Worker. See [Cloudflare's KV setup guide](https://developers.cloudflare.com/kv/get-started/).
-
-Store your production bot token as a secret:
+Store your production bot token, Keenable API key, and webhook secret as secrets:
 
 ```bash
-npx wrangler secret put BOT_TOKEN
+npx wrangler secret put DOCS_BOT_TOKEN
+npx wrangler secret put KEENABLE_API_KEY
+npx wrangler secret put DOCS_BOT_WEBHOOK_SECRET
 ```
+
+`DOCS_BOT_WEBHOOK_SECRET` can be any string of 1-256 letters, digits, `_`, or `-`, for example the output of `openssl rand -hex 32`. When it is set, the Worker rejects requests that don't carry it in the `X-Telegram-Bot-Api-Secret-Token` header with `401`, so only Telegram can deliver updates.
 
 Then deploy to Cloudflare Workers:
 ```bash
 npm run deploy
 ```
 
-Wrangler bundles the TypeScript source during deployment and connects `BOT_DATA` to your configured KV namespace.
+Wrangler bundles the TypeScript source during deployment.
 
 ### Setting up the Webhook
 
-After deployment, set up the webhook for your bot:
+After deployment, set up the webhook for your bot, passing the same webhook secret as `secret_token`:
 ```bash
 curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
      -H "Content-Type: application/json" \
-     -d '{"url": "https://your-worker.your-subdomain.workers.dev"}'
+     -d '{"url": "https://your-worker.your-subdomain.workers.dev", "secret_token": "<YOUR_WEBHOOK_SECRET>", "allowed_updates": ["message", "inline_query"]}'
 ```
 
-## Bot Commands
+If you change `DOCS_BOT_WEBHOOK_SECRET`, call `setWebhook` again with the new value. Until you do, Telegram's requests are rejected.
 
-- `/start` - Welcome message and available commands
-- `/ping` - Test if the bot is responsive
-- `/help` - Show help information
-- `/language [code]` - View or save a language preference for this chat, for example `/language de`
+## Usage
 
-The bot also echoes back any text messages sent to it.
+- In any chat, type `@your_bot` followed by a search query, such as `@your_bot session storage`, then pick a result to send a link to that page.
+- `/start` or `/help` in a private chat explains this and offers a button that starts an inline search.
 
-## Building on the session template
+## Search configuration
 
-`SessionData` in `src/index.ts` defines your per-chat state. Extend it with fields your bot needs and provide their defaults in `lazySession({ initial: ... })`. In a handler, use `const session = await ctx.session`, then read or modify its fields. grammY loads and saves the data through `KvAdapter` and `env.BOT_DATA`; the default session key is the chat ID. Handlers that never access `ctx.session` perform no session reads or writes.
+Each non-empty inline query triggers one [Keenable search](https://docs.keenable.ai/api-reference/search) restricted to `grammy.dev`. The bot requests 50 results, the most Keenable returns. That is also the most Telegram accepts in one inline answer, so every search fits on one page and pagination is never needed. Results keep Keenable's relevance order. The bot drops duplicate pages, such as `/plugins/router.html` and `/plugins/router`, removes the ` | grammY` title suffix, and uses the page snippet as the article description. Search results can include translated pages, such as `/zh/...`, when they match the query.
 
-The `/language` command demonstrates a preference that survives separate webhook requests. It stores a preference only; add your own translation logic when building your bot.
+`KEENABLE_API_KEY` is optional. Without it, the bot uses Keenable's keyless public endpoint, which is limited to 1,000 requests per hour per IP address. Cloudflare Workers share outbound IP addresses, so that limit is shared with unrelated traffic. Set a key for anything beyond a quick trial; see [Keenable's rate limits](https://docs.keenable.ai/rate-limits) and [credits](https://docs.keenable.ai/credits).
 
-KV is [eventually consistent](https://developers.cloudflare.com/kv/concepts/how-kv-works/) and [limits writes to the same key to once per second](https://developers.cloudflare.com/kv/platform/limits/). This scaffold suits low-frequency preferences; session updates are not atomic, so account for these limits when adding frequently changing or concurrent state.
+If a search fails, the bot logs the error and answers with no results and `cache_time: 0`, so Telegram doesn't cache the empty answer.
 
 ## Project Structure
 
@@ -126,7 +123,7 @@ KV is [eventually consistent](https://developers.cloudflare.com/kv/concepts/how-
 ├── src/
 │   └── index.ts          # Main worker entry point
 ├── test/
-│   └── worker.test.js    # Bundled Worker smoke test
+│   └── worker.test.js    # Bundled Worker tests
 ├── .dev.vars.example    # Local secret configuration example
 ├── .nvmrc               # Recommended Node.js version
 ├── package.json          # Dependencies and scripts

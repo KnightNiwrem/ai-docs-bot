@@ -1,78 +1,139 @@
-import { KvAdapter } from "@grammyjs/storage-cloudflare";
-import { Bot, lazySession, webhookCallback } from "grammy";
-import type { Context, LazySessionFlavor } from "grammy";
-
-// Extend this interface with the per-chat state your bot needs.
-export interface SessionData {
-  language: string;
-}
-
-type BotContext = Context & LazySessionFlavor<SessionData>;
+import {
+  Bot,
+  InlineKeyboard,
+  InlineQueryResultBuilder,
+  webhookCallback,
+} from "grammy";
+import type { InlineQueryResultArticle } from "grammy/types";
 
 export interface Env {
-  BOT_TOKEN: string;
-  BOT_DATA: KVNamespace;
+  DOCS_BOT_TOKEN: string;
+  // Optional. Without a key, the shared per-IP public endpoint is used.
+  KEENABLE_API_KEY?: string;
+  // Optional. When set, requests without a matching
+  // X-Telegram-Bot-Api-Secret-Token header are rejected with 401.
+  DOCS_BOT_WEBHOOK_SECRET?: string;
 }
+
+const DOCS_SITE = "grammy.dev";
+const KEENABLE_URL = "https://api.keenable.ai/v1/search";
+// Keenable returns at most 50 results, which is also the most Telegram accepts
+// in one answerInlineQuery call, so every search fits on a single page.
+const MAX_RESULTS = 50;
+const KEENABLE_TIMEOUT_MS = 5000;
+
+interface KeenableResult {
+  title: string;
+  url: string;
+  description?: string;
+  snippet?: string;
+}
+
+async function searchDocs(
+  query: string,
+  apiKey: string | undefined,
+): Promise<KeenableResult[]> {
+  const response = await fetch(
+    apiKey ? KEENABLE_URL : `${KEENABLE_URL}/public`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        // The public endpoint requires an app identifier instead of a key.
+        ...(apiKey
+          ? { "X-API-Key": apiKey }
+          : { "X-Keenable-Title": "grammY docs bot" }),
+      },
+      body: JSON.stringify({
+        query,
+        site: DOCS_SITE,
+        max_results: MAX_RESULTS,
+        snippet_max_length: 180,
+      }),
+      signal: AbortSignal.timeout(KEENABLE_TIMEOUT_MS),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Keenable search failed: ${response.status} ${await response.text()}`,
+    );
+  }
+  const { results } = (await response.json()) as { results: KeenableResult[] };
+  return results;
+}
+
+// grammy.dev serves every page both with and without `.html`, and Keenable
+// indexes both, so normalize URLs and keep the first (highest-ranked) match.
+function toArticles(results: KeenableResult[]): InlineQueryResultArticle[] {
+  const seen = new Set<string>();
+  const articles: InlineQueryResultArticle[] = [];
+  for (const result of results) {
+    const url = new URL(result.url);
+    url.pathname = url.pathname.replace(/\.html$/, "");
+    const key = `${url.origin}${url.pathname.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const title = result.title.replace(/\s*\|\s*grammY$/, "") || result.title;
+    const description = (result.description || result.snippet || "")
+      .replace(/​/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    articles.push(
+      InlineQueryResultBuilder.article(String(articles.length), title, {
+        url: url.href,
+        description,
+      }).text(`${title}\n${url.href}`),
+    );
+  }
+  return articles;
+}
+
+function createBot(env: Env): Bot {
+  const bot = new Bot(env.DOCS_BOT_TOKEN);
+
+  bot.command(["start", "help"], async (ctx) => {
+    await ctx.reply(
+      "I search the grammY documentation at grammy.dev.\n\n" +
+        `Type @${ctx.me.username} followed by your question in any chat, ` +
+        "then pick a page to share it.",
+      {
+        reply_markup: new InlineKeyboard().switchInlineCurrent(
+          "Search the docs",
+        ),
+      },
+    );
+  });
+
+  bot.on("inline_query", async (ctx) => {
+    const query = ctx.inlineQuery.query.trim();
+    if (!query) {
+      await ctx.answerInlineQuery([]);
+      return;
+    }
+    try {
+      const results = await searchDocs(query, env.KEENABLE_API_KEY);
+      await ctx.answerInlineQuery(toArticles(results));
+    } catch (error) {
+      console.error("Docs search error:", error);
+      // Don't let Telegram cache an empty answer caused by a transient failure.
+      await ctx.answerInlineQuery([], { cache_time: 0 });
+    }
+  });
+
+  return bot;
+}
+
+// Reuse the bot across requests in the same isolate so that grammY only calls
+// getMe once, instead of adding a round trip to every inline query.
+let handleUpdate: ((request: Request) => Promise<Response>) | undefined;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
-      // Initialize the bot with the token from environment variables
-      const bot = new Bot<BotContext>(env.BOT_TOKEN);
-
-      // Load and save per-chat state only when a handler accesses ctx.session.
-      bot.use(
-        lazySession({
-          initial: (): SessionData => ({ language: "en" }),
-          storage: new KvAdapter<SessionData>(env.BOT_DATA),
-        }),
-      );
-
-      // Set up basic bot commands
-      bot.command("start", async (ctx) => {
-        await ctx.reply(
-          "Hello! I'm a Telegram bot running on Cloudflare Workers using grammY! 🤖\n\n" +
-            "Available commands:\n" +
-            "/start - Show this message\n" +
-            "/ping - Ping the bot\n" +
-            "/help - Show help information\n" +
-            "/language [code] - View or set the chat's language preference",
-        );
+      handleUpdate ??= webhookCallback(createBot(env), "cloudflare-mod", {
+        secretToken: env.DOCS_BOT_WEBHOOK_SECRET,
       });
-
-      bot.command("ping", async (ctx) => {
-        await ctx.reply("Pong! 🏓");
-      });
-
-      bot.command("help", async (ctx) => {
-        await ctx.reply(
-          "This is a simple Telegram bot built with grammY and running on Cloudflare Workers.\n\n" +
-            "Commands:\n" +
-            "/start - Welcome message\n" +
-            "/ping - Test if the bot is responsive\n" +
-            "/help - This help message\n" +
-            "/language [code] - View or set the chat's language preference",
-        );
-      });
-
-      // A small example of reading and updating persistent session data.
-      bot.command("language", async (ctx) => {
-        const session = await ctx.session;
-        const language = ctx.match.trim();
-        if (language) session.language = language;
-        await ctx.reply(`Language preference: ${session.language}`);
-      });
-
-      // Handle any text message
-      bot.on("message:text", async (ctx) => {
-        const text = ctx.message.text;
-        await ctx.reply(`You said: "${text}"`);
-      });
-
-      // Create webhook callback for Cloudflare Workers
-      const handleUpdate = webhookCallback(bot, "cloudflare-mod");
-
-      // Handle the request
       return await handleUpdate(request);
     } catch (error) {
       console.error("Worker error:", error);

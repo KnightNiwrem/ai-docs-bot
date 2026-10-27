@@ -1,7 +1,7 @@
 {
-  "name": "cfw-grammy",
+  "name": "grammy-docs-bot",
   "version": "1.0.0",
-  "description": "A Cloudflare Worker Telegram bot using grammY",
+  "description": "A Telegram inline bot that searches the grammY documentation",
   "private": true,
   "type": "module",
   "engines": {
@@ -28,7 +28,6 @@
   "author": "KnightNiwrem",
   "license": "MIT",
   "dependencies": {
-    "@grammyjs/storage-cloudflare": "2.4.2",
     "grammy": "^1.46.0"
   },
   "devDependencies": {
