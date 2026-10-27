@@ -98,7 +98,7 @@ test("inline queries are answered with ranked, deduplicated grammy.dev results",
   assert.equal(search.headers["X-API-Key"], "keen_test");
   assert.equal(search.body.query, "inline queries");
   assert.equal(search.body.site, "grammy.dev");
-  assert.equal(search.body.max_results, 50);
+  assert.equal(search.body.max_results, 25);
 
   const [answer] = telegramCalls("answerInlineQuery");
   assert.equal(answer.body.inline_query_id, "q1");

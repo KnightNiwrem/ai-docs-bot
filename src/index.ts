@@ -17,9 +17,10 @@ export interface Env {
 
 const DOCS_SITE = "grammy.dev";
 const KEENABLE_URL = "https://api.keenable.ai/v1/search";
-// Keenable returns at most 50 results, which is also the most Telegram accepts
-// in one answerInlineQuery call, so every search fits on a single page.
-const MAX_RESULTS = 50;
+// Keenable has no relevance score, only rank order, and the lower-ranked pages
+// of a 50-result search are often off-topic, so keep only the top results.
+// Anything up to 50 fits in one answerInlineQuery call, so there is no paging.
+const MAX_RESULTS = 25;
 const KEENABLE_TIMEOUT_MS = 5000;
 
 interface KeenableResult {
